@@ -1,143 +1,97 @@
-﻿// std
-using namespace std;
-
-// -==-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-
-// Directive Sapce 
+﻿// Directive Space : 
 
 #include <iostream>
-#include <thread>
-#include <chrono>
-#include <mutex>
-#include <atomic>
-#include <vector>
-
-// -==-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+#include <iomanip>    // For setw and output of addresses in hex
+#include <thread>     // For sleep_for
+#include <chrono>     // For the delay time
+#include <cstdlib>    // For rand() and system()
+#include <ctime>      // To initialize the random number generator
 
 
-// Глобальные переменные для матриц и их размера
-int currentN = 10; // Начальный размер матриц
-vector<vector<int>> globalA;
-vector<vector<int>> globalB;
+// ----             ----
 
-// Мьютекс и условная переменная для синхронизации
-mutex cv_mtx;
-condition_variable cv;
-int finishedCount = 0; // Счётчик завершённых потоков умножения
+using namespace std;
 
-// Функция умножения матриц (стандартная реализация)
-void multiplyMatrices(const vector<vector<int>>& A, const vector<vector<int>>& B,
-    vector<vector<int>>& C, int N) {
-    for (int i = 0; i < N; ++i) {
-        for (int j = 0; j < N; ++j) {
-            int sum = 0;
-            for (int k = 0; k < N; ++k) {
-                sum += A[i][k] * B[k][j];
-            }
-            C[i][j] = sum;
-        }
-    }
-}
-
-// Функция, выполняемая в потоках умножения матриц
-void multiplicationThread(int threadId) {
-    while (true) {
-        // Считываем текущий размер матриц (это целое, поэтому здесь не нужен дополнительный mutex)
-        int N_local = currentN;
-
-        // Локальный результат умножения
-        vector<vector<int>> C(N_local, vector<int>(N_local, 0));
-
-        // Замер времени начала умножения
-        auto start = chrono::high_resolution_clock::now();
-
-        // Выполняем умножение глобальных матриц (предполагается, что обновление происходит только между циклами)
-        multiplyMatrices(globalA, globalB, C, N_local);
-
-        auto end = chrono::high_resolution_clock::now();
-        chrono::duration<double> duration = end - start;
-
-
-        cout << "=============================================" << endl;
-        cout << ">>> Thread " << threadId << " completed matrix multiplication" << endl;
-        cout << "Matrix size : " << N_local << "x" << N_local << endl;
-        cout << "lead time : [" << duration.count() << " seconds]" << endl;
-        cout << "=============================================" << endl;
-
-        // Синхронизация: сообщаем, что данный поток завершил цикл умножения
-        {
-            unique_lock<mutex> lk(cv_mtx);
-            finishedCount++;
-            // Если все 4 потока завершили умножение, уведомляем генератор
-            if (finishedCount == 4) {
-                cv.notify_one();
-            }
-            // Ожидаем, пока генератор не создаст новые матрицы (finishedCount сбрасывается в 0)
-            cv.wait(lk, [] { return finishedCount == 0; });
-        }
-    }
-}
-
-// Функция генератора новых матриц
-void matrixGeneratorThread() {
-    while (true) {
-        // Ждём, пока все 4 потока умножения не завершат текущий цикл
-        {
-            unique_lock<mutex> lk(cv_mtx);
-            cv.wait(lk, [] { return finishedCount == 4; });
-        }
-
-        // Обновляем размер матриц: удваиваем
-        currentN *= 2;
-        int newSize = currentN;
-
-
-        cout << "\n---------------------------------------------------" << endl;
-        cout << "Generator: creating new matrices of size " << newSize << "x" << newSize << endl;
-		cout << "---------------------------------------------------" << endl;
+// ----             ----
 
 
 
+//  --              -------------------------           --
+// |     ANSI escape sequences for colorful typography    |
+//  --              -------------------------           --
 
-        // Генерация новых матриц:
-        // Матрица A заполняется единицами, B – двойками (можно изменить логику генерации по необходимости)
-        vector<vector<int>> newA(newSize, vector<int>(newSize, 1));
-        vector<vector<int>> newB(newSize, vector<int>(newSize, 2));
+const string RED = "\033[1;31m";
+const string GREEN = "\033[1;32m";
+const string YELLOW = "\033[1;33m";
+const string BLUE = "\033[1;34m";
+const string MAGENTA = "\033[1;35m";
+const string CYAN = "\033[1;36m";
+const string RESET = "\033[0m";
 
-        // Обновляем глобальные матрицы (в критической секции)
-        {
-            unique_lock<mutex> lk(cv_mtx);
-            globalA = move(newA);
-            globalB = move(newB);
 
-            // Сбрасываем счётчик, чтобы начать новый цикл
-            finishedCount = 0;
-            // Уведомляем все потоки о том, что новые матрицы готовы и можно приступать к умножению
-            cv.notify_all();
-        }
-    }
-}
+//  --              -------------------------           --
 
+// Main function of the program
 int main() {
-    // Инициализируем глобальные матрицы размером 500x500
-    globalA = vector<vector<int>>(currentN, vector<int>(currentN, 1));
-    globalB = vector<vector<int>>(currentN, vector<int>(currentN, 2));
+    // Initializing the random number generator
+    srand(static_cast<unsigned>(time(0)));
 
-    // Создаём 4 потока для умножения матриц
-    const int numMultiplicationThreads = 4;
-    thread multThreads[numMultiplicationThreads];
-    for (int i = 0; i < numMultiplicationThreads; ++i) {
-        multThreads[i] = thread(multiplicationThread, i);
+    // Create an array of 10 integers (real variables)
+    int arr[10];
+    for (int i = 0; i < 10; i++) {
+        arr[i] = rand() % 100;  // random number from 0 to 99
     }
 
-    // Создаём 5-ый поток для генерации матриц
-    thread generatorThread(matrixGeneratorThread);
-
-    // Присоединяем потоки (хотя программа работает вечно)
-    for (int i = 0; i < numMultiplicationThreads; ++i) {
-        multThreads[i].join();
+    // An array of pointers to each element of the array
+    int* ptrs[10];
+    for (int i = 0; i < 10; i++) {
+        ptrs[i] = &arr[i];
     }
-    generatorThread.join();
+
+    // Infinite loop to update data every 4 seconds
+    while (true) {
+        // Clear console (CLS for Windows, clear for Unix-like systems)
+#ifdef _WIN32
+        system("CLS");
+#else
+        system("clear");
+#endif
+
+        cout << BLUE << "=== Demonstration of pointers in C++ ===" << RESET << "\n\n";
+
+        // Printing the state of an array and its pointers
+        cout << GREEN << "State of array and pointers:" << RESET << "\n";
+        for (int i = 0; i < 10; i++) {
+            cout << YELLOW << "Element " << setw(2) << i << ":" << RESET
+                << " value = " << setw(3) << arr[i]
+                << " | address = " << ptrs[i]
+                    << " (hex: " << hex << reinterpret_cast<uintptr_t>(ptrs[i]) << dec << ")" << "\n";
+        }
+
+        // Demonstration of pointer to pointer
+        cout << "\n" << MAGENTA << "Demonstration of pointer to pointer:" << RESET << "\n";
+        int* pFirst = &arr[0];    // pointer to the first element
+        int** ppFirst = &pFirst;  // pointer to pointer
+        cout << "The value of the first element via a pointer: " << *pFirst << "\n";
+        cout << "The value of the first element via a pointer to a pointer: " << **ppFirst << "\n";
+
+        // Example of exchanging values ​​via pointers
+        cout << "\n" << CYAN << "Exchanging the values ​​of the first and last element via pointers:" << RESET << "\n";
+        cout << "Before the exchange : arr[0] = " << arr[0] << ", arr[9] = " << arr[9] << "\n";
+        // Exchanging values ​​via pointers
+        int temp = *ptrs[0];
+        *ptrs[0] = *ptrs[9];
+        *ptrs[9] = temp;
+        cout << "After the exchange: arr[0] = " << arr[0] << ", arr[9] = " << arr[9] << "\n";
+
+        //Update array values ​​with random numbers for the next iteration
+        for (int i = 0; i < 10; i++) {
+            arr[i] = rand() % 100;
+        }
+
+        cout << "\n" << BLUE << "Next update in 4 seconds..." << RESET << "\n";
+        std::this_thread::sleep_for(std::chrono::seconds(4));  
+    }
 
     return 0;
 }
